@@ -1,0 +1,60 @@
+# GitLab CI for the Covey plugin SDK.
+#
+# This module is the contract. Everything else in the ecosystem builds against
+# it, so the checks that matter are not "does it compile" — they are "does it
+# still have no dependencies" and "do the plugins still build against it".
+
+stages: [test, contract]
+
+variables:
+  GOPATH: $CI_PROJECT_DIR/.go
+  GOTOOLCHAIN: local
+
+.go-cache: &go-cache
+  cache:
+    key: "go-$CI_COMMIT_REF_SLUG"
+    paths:
+      - .go/pkg/mod
+
+test:
+  stage: test
+  image: golang:1.26
+  <<: *go-cache
+  script:
+    - go build ./...
+    - go vet ./...
+    - test -z "$(gofmt -l $(go list -f '{{.Dir}}' ./...) | tee /dev/stderr)"
+    - go test ./... -count=1
+
+dependency-free:
+  stage: test
+  image: golang:1.26
+  <<: *go-cache
+  # A plugin author depends on this module and should get NOTHING else with it.
+  # The day somebody adds a convenient library here, every plugin in the world
+  # inherits it — so the rule is checked, not remembered.
+  script:
+    - deps=$(go list -m all | tail -n +2)
+    - |
+      if [ -n "$deps" ]; then
+        echo "the contract must stay dependency-free, found:"
+        echo "$deps"
+        exit 1
+      fi
+    - echo "dependency-free"
+
+plugins-still-build:
+  stage: contract
+  image: golang:1.26
+  <<: *go-cache
+  # The mirror image of the pack's check: does the pack still build against
+  # THIS state of the contract? Allowed to fail for the same reason — a red
+  # pipeline here would blame the wrong commit.
+  allow_failure: true
+  script:
+    - git clone --depth 1 https://github.com/benjaminLedel/covey-plugin-pack /tmp/pack
+    - cd /tmp/pack
+    - go mod edit -replace github.com/benjaminLedel/covey-plugin-sdk="$CI_PROJECT_DIR"
+    - GOFLAGS=-mod=mod go mod tidy
+    - go build ./...
+    - go test ./... -count=1
