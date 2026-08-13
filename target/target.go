@@ -320,6 +320,26 @@ type Descriptor struct {
 	// fields below: the setup assistant acts on those, and a step it can carry
 	// out itself has no business being an instruction.
 	SetupDoc string `json:"setup_doc,omitempty"`
+	// Env are the environment variables this plugin reads AT WORK — in the
+	// sandbox, where the action proxy runs it, not in the control plane.
+	//
+	// It has to be declared because of where the two halves live. Operational
+	// configuration (intake allowlists, size limits) is set on the control
+	// plane, 12-factor style; the plugin that reads it runs somewhere else
+	// entirely. A variable that does not make the journey is not merely
+	// ineffective — an empty intake allowlist reads as "no restriction", so it
+	// inverts into the widest setting, quietly. Covey therefore carries exactly
+	// what is declared here into the sandbox.
+	//
+	// A plugin may only name variables in its OWN namespace: COVEY_<NAME>_…
+	// with NAME being this plugin's Name, upper-cased. Anything else is
+	// dropped, and that rule is what makes this safe to honour from a plugin
+	// somebody else wrote — no declaration can reach COVEY_MASTER_KEY,
+	// COVEY_DATABASE_URL or the daemon's own connection variables.
+	//
+	// Declare the name, never the value. Secrets do not belong here; they come
+	// from the broker, per call.
+	Env []string `json:"env,omitempty"`
 	// Scopes are the access levels this plugin understands in ACCESS.md
 	// (`- system: zammad scope: read,write,comment`). The plugin declares them
 	// because only it knows them; the assistant offers exactly these instead of
