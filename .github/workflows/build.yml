@@ -1,0 +1,67 @@
+name: build
+
+# This module is the contract. Everything else in the ecosystem builds against
+# it, so the check that matters is not "does it compile" — it is "does it still
+# have no dependencies, and do the plugins still build against it".
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test ./... -count=1
+
+      # A plugin author depends on this module and should get NOTHING else with
+      # it. The day somebody adds a convenient library here, every plugin in the
+      # world inherits it — so the rule is checked, not remembered.
+      - name: No dependencies beyond the standard library
+        run: |
+          set -euo pipefail
+          deps=$(go list -m all | tail -n +2)
+          if [ -n "$deps" ]; then
+            echo "::error::the contract must stay dependency-free, found:"
+            echo "$deps"
+            exit 1
+          fi
+          echo "dependency-free"
+
+  plugins-still-build:
+    name: the plugin pack still builds against this
+    runs-on: ubuntu-latest
+    # Informational: the pack may legitimately lag behind a change here, and a
+    # red tick on this repository's pull request would say the wrong thing.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: sdk
+      - uses: actions/checkout@v4
+        with:
+          repository: benjaminLedel/covey-plugin-pack
+          path: pack
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Build the pack against this checkout
+        run: |
+          set -euo pipefail
+          cd pack
+          go mod edit -replace github.com/benjaminLedel/covey-plugin-sdk=../sdk
+          GOFLAGS=-mod=mod go mod tidy
+          go build ./...
+          go test ./... -count=1
