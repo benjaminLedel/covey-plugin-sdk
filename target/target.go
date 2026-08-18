@@ -78,10 +78,29 @@ type Webhooker interface {
 	ParseWebhook(body []byte) (WebhookEvent, error)
 }
 
-// Credential is the brokered access pair for a target system.
+// Credential is the brokered access to a target system: where it is, how to
+// authenticate against it, and — where the endpoint is not signed by a publicly
+// trusted authority — who to trust for it.
 type Credential struct {
 	BaseURL string
 	Token   string
+	// CA is the PEM certificate (or chain) that signs the target system's
+	// endpoint, brokered from the optional secret <system>_ca. Empty means the
+	// system roots apply, which is the normal case for anything on the public
+	// internet; an internal Kubernetes API server or an appliance behind a
+	// company CA is the case this exists for.
+	//
+	// It belongs in the credential and not in an action's parameters, however
+	// tempting the latter is. A parameter travels through the model's call, the
+	// guard rails and the recording of every single action — the trust anchor
+	// of an endpoint has nothing to do with any of them, and repeating it there
+	// makes every call carry a certificate. Here it is brokered once, per call,
+	// like the token beside it.
+	//
+	// A plugin that cannot make its own connection (a wasm module, a manifest)
+	// never sees this either: the HOST builds the trust store from it. Only a
+	// compiled plugin, which does its own dialling, reads the field.
+	CA string
 }
 
 // WorkChecker is an optional plugin interface for systems without a webhook:
