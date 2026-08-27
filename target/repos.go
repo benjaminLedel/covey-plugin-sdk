@@ -51,6 +51,41 @@ func ReposDir(workdir string) string { return filepath.Join(workdir, "repos") }
 // Best effort — a checkout that cannot be removed is not worth failing the
 // action that has already succeeded.
 func PruneOldCheckouts(workdir, keep string) []string {
+	return PruneOldCheckoutsSince(workdir, keep, protectedFor())
+}
+
+// protectedFor: so lange gilt eine Arbeitskopie als „in Benutzung" und wird
+// nicht verdrängt, gleich wie viele andere seither geholt wurden.
+//
+// Eine halbe Stunde, weil das die Länge eines Laufs ist, in dem ein Agent
+// zwischen Projekten hin- und herspringt: fünf kleine Abrufe in einem Zug
+// haben einen 700-MB-Baum verdrängt, in dem er seit Stunden arbeitete.
+// Überschreibbar über COVEY_CHECKOUT_PROTECT_MINS; 0 schaltet den Schutz ab
+// und stellt das reine „am längsten nicht benutzt" wieder her.
+func protectedFor() time.Duration {
+	if n, err := strconv.Atoi(strings.TrimSpace(os.Getenv("COVEY_CHECKOUT_PROTECT_MINS"))); err == nil {
+		return time.Duration(n) * time.Minute
+	}
+	return 30 * time.Minute
+}
+
+// PruneOldCheckoutsSince ist dasselbe mit einer Schonfrist: was innerhalb von
+// protect benutzt wurde, bleibt stehen, auch wenn es damit mehr als
+// keptCheckouts() Kopien sind.
+//
+// Der Grund ist der Unterschied zwischen einem Zwischenspeicher und einem
+// Arbeitsplatz. „Am längsten nicht benutzt" ist die richtige Regel für Kopien,
+// die man liest; ein Checkout ist der Ort, an dem gearbeitet wird, und der
+// unterscheidet sich von den fünf, die jemand einmal angesehen hat, nicht durch
+// seinen Rang, sondern dadurch, dass er GERADE benutzt wird. Ohne die Frist
+// verdrängen fünf beiläufige Abrufe den sechsten, in dem die Arbeit steckt —
+// genau so ist auf einer produktiven Instanz ein Baum aus dreizehn
+// Teil-Abrufen verschwunden.
+//
+// Die Grenze bleibt trotzdem eine: COVEY_CHECKOUT_KEEP deckelt den Dauerzustand,
+// und wer wirklich in zwanzig Repositories binnen einer halben Stunde arbeitet,
+// hat ein Platzproblem, das ein stilles Löschen nur verschiebt.
+func PruneOldCheckoutsSince(workdir, keep string, protect time.Duration) []string {
 	limit := keptCheckouts()
 	if limit <= 0 || workdir == "" {
 		return nil
@@ -84,6 +119,11 @@ func PruneOldCheckouts(workdir, keep string) []string {
 
 	var removed []string
 	for _, c := range cands[free:] {
+		// Frisch benutzt heißt: da arbeitet jemand. Der Platz, den das kostet,
+		// ist der Preis dafür, keine laufende Arbeit wegzuwerfen.
+		if protect > 0 && time.Since(c.used) < protect {
+			continue
+		}
 		if err := os.RemoveAll(filepath.Join(dir, c.name)); err == nil {
 			removed = append(removed, c.name)
 		}
