@@ -23,7 +23,10 @@ package target
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
+	"time"
 )
 
 // System is a connected target system. It bundles the integration surfaces
@@ -385,6 +388,87 @@ type Prober interface {
 	Probe(ctx context.Context, cred Credential) (string, error)
 }
 
+// CredentialInfo is what a plugin knows about a credential beyond "it works".
+//
+// It exists because a token has a lifetime and Probe cannot say so: an
+// Atlassian API token dies after a year at most, a Data Center PAT after what
+// the instance allows, and the first sign of either used to be a 401 in a
+// recording. What the target system does not say stays empty — a guessed
+// expiry is worse than none, because covey warns from it.
+type CredentialInfo struct {
+	// Identity is what Probe reports: the account the credential acts as.
+	// Short and recognisable, shown as is.
+	Identity string `json:"identity,omitempty"`
+	// ID is the target system's own identifier for this credential, where it
+	// has one (a PAT id). Rotate always fills it for the successor; Inspect
+	// fills it only when the credential can be told apart from its siblings.
+	ID string `json:"id,omitempty"`
+	// ExpiresAt is when the target system will stop accepting the credential.
+	// nil: the system does not say.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	// Rotatable says whether THIS credential can mint its successor through
+	// Rotate. It sits on the info rather than on the plugin because it is a
+	// property of the credential: the same Jira plugin holds Cloud API tokens
+	// (never rotatable) and Data Center PATs (rotatable), told apart by the
+	// token's shape.
+	Rotatable bool `json:"rotatable,omitempty"`
+}
+
+// CredentialInspector is an optional plugin interface that extends Prober
+// with what the target system knows about the credential's lifetime.
+// Read-only, like Probe, and asked instead of it where present — a plugin
+// that has Inspect need not repeat itself in Probe, but should keep Probe for
+// hosts that only know that one.
+type CredentialInspector interface {
+	Inspect(ctx context.Context, cred Credential) (CredentialInfo, error)
+}
+
+// Rotator is an optional plugin interface for target systems that let a
+// credential mint its own successor (Jira Data Center: a PAT creates a PAT).
+//
+// The control plane drives it, never a run: Rotate returns the successor and
+// its lifetime, the caller verifies it with Inspect or Probe, stores it, and
+// only then revokes the old one by the ID it kept from CredentialInfo. That
+// order is the contract — a rotation that revoked first and then failed to
+// store or verify would leave the agent without any credential at all. A plugin that cannot
+// revoke (no API for it, no ID known) returns nil from Revoke and lets the old
+// credential run out.
+type Rotator interface {
+	Rotate(ctx context.Context, cred Credential) (Credential, CredentialInfo, error)
+	Revoke(ctx context.Context, cred Credential, id string) error
+}
+
+// CredentialRejectedError says that the target system refused the credential
+// itself — not the request, not the permission: the token is expired, revoked
+// or wrong. A plugin returns it (wrapping what the system said) so that the
+// host can mark the stored secret instead of filing the failure under the
+// action, where it reads as a permission problem three weeks later.
+//
+// 401 is the usual carrier. 403 is deliberately not: it is what a system
+// answers to a valid credential that may not do this one thing, and marking
+// the secret for that would be wrong in the way that matters.
+type CredentialRejectedError struct {
+	Status int   // the HTTP status the target system answered, if any
+	Err    error // what it said
+}
+
+func (e *CredentialRejectedError) Error() string {
+	if e.Err == nil {
+		return fmt.Sprintf("credential rejected (HTTP %d)", e.Status)
+	}
+	return "credential rejected: " + e.Err.Error()
+}
+
+func (e *CredentialRejectedError) Unwrap() error { return e.Err }
+
+// IsCredentialRejected reports whether err, anywhere in its chain, says the
+// credential was refused. Hosts read it at the seam where a plugin's error
+// leaves the plugin.
+func IsCredentialRejected(err error) bool {
+	var r *CredentialRejectedError
+	return errors.As(err, &r)
+}
+
 // Optional capabilities a plugin may carry. A COMPILED plugin says so through
 // its method set — it either has Probe or it does not, and a type assertion is
 // the whole check. A plugin whose behaviour lives in DATA (a manifest) cannot:
@@ -397,8 +481,10 @@ type Prober interface {
 // data-driven plugin reports its capabilities explicitly, and the call sites ask
 // through the helpers below instead of asserting directly.
 const (
-	CapProbe = "probe"
-	CapPoll  = "poll"
+	CapProbe   = "probe"
+	CapPoll    = "poll"
+	CapInspect = "inspect"
+	CapRotate  = "rotate"
 )
 
 // CapabilityReporter is implemented by plugins whose optional capabilities are
@@ -425,6 +511,27 @@ func Probes(sys System) (Prober, bool) {
 		return nil, false
 	}
 	return p, true
+}
+
+// Inspects returns the system's CredentialInspector if it really can inspect.
+// Use this instead of a bare type assertion on CredentialInspector.
+func Inspects(sys System) (CredentialInspector, bool) {
+	i, ok := sys.(CredentialInspector)
+	if !ok || !supports(sys, CapInspect) {
+		return nil, false
+	}
+	return i, true
+}
+
+// Rotates returns the system's Rotator if it really can rotate. Whether a
+// PARTICULAR credential can is CredentialInfo.Rotatable — this only says the
+// plugin knows how.
+func Rotates(sys System) (Rotator, bool) {
+	r, ok := sys.(Rotator)
+	if !ok || !supports(sys, CapRotate) {
+		return nil, false
+	}
+	return r, true
 }
 
 // WorkChecks returns the system's WorkChecker if it really can check for work up
