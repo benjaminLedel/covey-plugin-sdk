@@ -22,9 +22,28 @@ type WorkEntry struct {
 //
 // What reads the items: covey's workflows start one case per waiting item and
 // hand a change on an item to the case that is already running for it. A
-// plugin gets that by signing its work in this shape, through WorkSignature;
-// it implements nothing else. A signature in any other shape still works as a
-// watermark, and a host then treats the whole of it as one piece of work.
+// plugin gets that by signing its work in this shape, through WorkSignature,
+// and saying so once (ItemSigner). A signature in any other shape still works
+// as a watermark, and a host then treats the whole of it as one piece of work.
+
+// ItemSigner says that a work checker's signature is written with
+// WorkSignature, one entry per waiting item. It has to be said rather than
+// guessed: a signature hashed down to one entry ("3@a1b2c3…", the count and a
+// digest) has the same shape as one waiting item, and a host that read it as
+// one would make a case of the digest.
+//
+// A method rather than a bare marker so that a plugin whose behaviour lives in
+// data (a manifest) can answer per definition. Use SignsItems to ask.
+type ItemSigner interface {
+	SignedWorkChecker
+	SignsWorkItems() bool
+}
+
+// SignsItems answers whether sys signs its work item by item.
+func SignsItems(sys System) bool {
+	s, ok := sys.(ItemSigner)
+	return ok && s.SignsWorkItems()
+}
 
 // WorkSignature writes entries as a signature: sorted, so that the order the
 // target system returned the items in does not move it. No entries give "".

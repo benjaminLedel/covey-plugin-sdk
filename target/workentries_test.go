@@ -1,6 +1,8 @@
 package target
 
 import (
+	"context"
+	"encoding/json"
 	"reflect"
 	"testing"
 )
@@ -70,5 +72,31 @@ func TestWorkEntriesRefusesWhatIsNotAList(t *testing.T) {
 		if got, ok := WorkEntries(sig); ok {
 			t.Errorf("%q read as items: %v", sig, got)
 		}
+	}
+}
+
+type itemGate struct{ items bool }
+
+func (itemGate) Name() string                                 { return "x" }
+func (itemGate) ActionSubject(string, json.RawMessage) string { return "" }
+func (itemGate) PromptDoc() string                            { return "" }
+func (itemGate) Execute(context.Context, string, json.RawMessage, Credential) (any, error) {
+	return nil, nil
+}
+func (itemGate) HasWork(context.Context, Credential) (bool, error) {
+	return true, nil
+}
+func (itemGate) HasWorkSigned(context.Context, Credential, string) (bool, string, error) {
+	return true, "", nil
+}
+func (g itemGate) SignsWorkItems() bool { return g.items }
+
+// Only a plugin that says its signature lists items is read item by item.
+func TestSignsItemsIsSaidNotGuessed(t *testing.T) {
+	if !SignsItems(itemGate{items: true}) {
+		t.Error("a plugin that says so is not taken at its word")
+	}
+	if SignsItems(itemGate{items: false}) {
+		t.Error("a plugin that says no is read as items")
 	}
 }

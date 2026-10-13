@@ -150,8 +150,8 @@ type KindWorkChecker interface {
 //
 // Write the signature with WorkSignature, one entry per waiting item. Then a
 // host can also tell WHICH items are waiting and which of them changed — what
-// covey's workflows need to run one case per item (see workentries.go). The
-// plugin implements nothing more for that.
+// covey's workflows need to run one case per item, once the plugin says so
+// with ItemSigner (see workentries.go).
 type SignedWorkChecker interface {
 	WorkChecker
 	// HasWorkSigned checks like HasWorkKind (kind == "" → like HasWork) and
