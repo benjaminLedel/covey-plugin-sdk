@@ -147,6 +147,11 @@ type KindWorkChecker interface {
 //
 // An empty signature switches the suppression off: then the heartbeat fires on
 // every level as before (fail-open).
+//
+// Write the signature with WorkSignature, one entry per waiting item. Then a
+// host can also tell WHICH items are waiting and which of them changed — what
+// covey's workflows need to run one case per item, once the plugin says so
+// with ItemSigner (see workentries.go).
 type SignedWorkChecker interface {
 	WorkChecker
 	// HasWorkSigned checks like HasWorkKind (kind == "" → like HasWork) and
