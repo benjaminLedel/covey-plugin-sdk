@@ -27,6 +27,8 @@ It also keeps the graph acyclic: Covey depends on this, plugin repositories depe
 | `Descriptor` + `Register` | how a plugin announces itself; the registry both the control plane and the sandbox daemon read |
 | Optional interfaces | `Webhooker` (inbound events), `Prober` (connection test), `CredentialInspector`/`Rotator` (a credential's lifetime, and its successor), `WorkChecker`/`SignedWorkChecker` (`nur-wenn:` gating), `ScopedDocSystem` (narrow the doc to an agent's scopes) |
 | `Credential` | the brokered base URL and token — handed in per call, never stored by a plugin |
+| `Credential.Login` | the account the token acts as, set by the host when the system cannot be asked (a GitHub App's `name[bot]`) |
+| `Actor` / `ActorFrom(ctx)` | the agent an action runs for — for commit authors, signatures and routing markers when several agents share one identity |
 | Context helpers | `Workdir`, `EmitArtifact`, `SubAgent` — the sandbox capabilities a plugin may use when Covey grants them |
 | `Client` | the HTTP client to use, so a plugin's traffic ends up in Covey's request log instead of being invisible |
 | `StoreFile`, `StoreStream`, `PruneOldCheckouts` | the small helpers plugins kept reinventing |
