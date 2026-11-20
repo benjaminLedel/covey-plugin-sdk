@@ -104,6 +104,13 @@ type Credential struct {
 	// never sees this either: the HOST builds the trust store from it. Only a
 	// compiled plugin, which does its own dialling, reads the field.
 	CA string
+	// Login is the account the token acts as, when the HOST knows it and the
+	// system cannot be asked. A GitHub App installation token is the case this
+	// exists for: GET /user refuses such a token, yet everything that hangs off
+	// "did I write that myself?" needs the bot's login ("name[bot]"). The host
+	// minted the token, so it knows; a plugin that finds the field empty asks
+	// the system as before. Never a secret, never part of an action's params.
+	Login string
 }
 
 // WorkChecker is an optional plugin interface for systems without a webhook:
@@ -195,7 +202,35 @@ const (
 	workdirKey ctxKey = iota
 	artifactSinkKey
 	subAgentKey
+	actorKey
 )
+
+// Actor is the agent on whose behalf an action runs. Several agents of one
+// organisation can share a single identity on the target system (one GitHub
+// App, one service account); the actor is how a plugin still says WHICH of
+// them acted — as a commit author, a signature line or a hidden marker that
+// lets the host route the answer back to the right agent.
+type Actor struct {
+	// Slug is the agent's stable handle within its organisation.
+	Slug string
+	// Name is the display name ("7OS Developer").
+	Name string
+	// Org is the organisation's display name, for signatures. May be empty.
+	Org string
+}
+
+// WithActor attaches the acting agent to the context. The action proxy sets it
+// per action.
+func WithActor(ctx context.Context, a Actor) context.Context {
+	return context.WithValue(ctx, actorKey, a)
+}
+
+// ActorFrom reads the acting agent from the context. ok is false outside an
+// agent's action (setup probes, the heartbeat pre-check).
+func ActorFrom(ctx context.Context) (Actor, bool) {
+	a, ok := ctx.Value(actorKey).(Actor)
+	return a, ok && a.Slug != ""
+}
 
 // Artifact is a binary side result of an action that belongs in the recording
 // (e.g. a screenshot) but NOT in the action result handed to the runtime —
