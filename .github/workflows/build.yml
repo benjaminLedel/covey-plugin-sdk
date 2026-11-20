@@ -44,16 +44,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Pinned to the 1.26 line, not "stable" — the same arrangement as the
+      # plugin pack (#63). When the runners took Go 1.27, govulncheck v1.1.4
+      # met syntax its x/tools does not know and panicked ("unexpected expr:
+      # *ast.KeyValueExpr"), and gosec stops on the standard library's export
+      # data of a Go line it was not built for. Neither is a finding; both
+      # read like one. check-latest, because govulncheck checks the standard
+      # library of the toolchain it builds with: the runner's preinstalled
+      # 1.26 is a patch behind after every release and would report what the
+      # next patch already fixed. Move the line together with the tool pins.
       - uses: actions/setup-go@v5
         with:
-          go-version: stable
+          go-version: "1.26"
+          check-latest: true
           cache: true
 
       # The same two tools Covey runs. govulncheck has little to chew on here —
       # the module has no dependencies, which is the point — but it is the step
-      # that would notice the day that stops being true.
+      # that would notice the day that stops being true. Pinned (a tool fetched
+      # fresh on every run is itself a way in), and bumped when Go moves: a
+      # release from before the current Go panics instead of reporting.
       - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
 
       # gosec earns its place: this module joins paths and writes files into a
       # sandbox on behalf of plugins (StoreFile, PruneOldCheckouts). Path
@@ -61,7 +73,7 @@ jobs:
       # inherited by every plugin at once.
       - name: gosec
         run: |
-          go run github.com/securego/gosec/v2/cmd/gosec@v2.22.9 \
+          go run github.com/securego/gosec/v2/cmd/gosec@v2.29.0 \
             -include=G101,G102,G106,G107,G108,G109,G110,G201,G202,G203,G303,G305,G401,G402,G403,G404,G501,G502,G503,G504,G505 \
             -exclude-dir=.go ./...
 
